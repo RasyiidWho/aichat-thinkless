@@ -172,7 +172,7 @@ async fn markdown_stream_inner<W: Write>(
                                     queue!(writer, style::Print(pre_content))?;
                                 }
                                 
-                                queue!(writer, style::Print(format!("\n{}", dimmed_text("Thinking: "))))?;
+                                // queue!(writer, style::Print(format!("\n{}", dimmed_text("Thinking: "))))?;
 
                                 let content_start = start + 7;
                                 let content_end = start + end_rel;
@@ -196,7 +196,7 @@ async fn markdown_stream_inner<W: Write>(
                                      queue!(writer, style::Print(pre_content))?;
                                 }
 
-                                queue!(writer, style::Print(format!("\n{}", dimmed_text("Thinking: "))))?;
+                                // queue!(writer, style::Print(format!("\n{}", dimmed_text("Thinking: "))))?;
                                 
                                 let content = &text[start + 7..];
                                 let output = dimmed_text(content).replace('\n', "\r\n");
