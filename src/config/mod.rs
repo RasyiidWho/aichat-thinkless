@@ -96,6 +96,38 @@ const RIGHT_PROMPT: &str = "{color.purple}{?session {?consume_tokens {consume_to
 
 static EDITOR: OnceLock<Option<String>> = OnceLock::new();
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkTagMode {
+    Hide,
+    #[default]
+    Replace,
+    Show,
+}
+
+impl std::fmt::Display for ThinkTagMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThinkTagMode::Hide => write!(f, "hide"),
+            ThinkTagMode::Replace => write!(f, "replace"),
+            ThinkTagMode::Show => write!(f, "show"),
+        }
+    }
+}
+
+impl std::str::FromStr for ThinkTagMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "hide" => Ok(ThinkTagMode::Hide),
+            "replace" => Ok(ThinkTagMode::Replace),
+            "show" => Ok(ThinkTagMode::Show),
+            _ => bail!("Invalid think_tag_mode: {}", s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -145,6 +177,9 @@ pub struct Config {
     pub user_agent: Option<String>,
     pub save_shell_history: bool,
     pub sync_models_url: Option<String>,
+
+    pub think_tag_mode: ThinkTagMode,
+    pub think_tag_remove: bool,
 
     pub clients: Vec<ClientConfig>,
 
@@ -220,6 +255,9 @@ impl Default for Config {
             user_agent: None,
             save_shell_history: true,
             sync_models_url: None,
+
+            think_tag_mode: Default::default(),
+            think_tag_remove: true,
 
             clients: vec![],
 
@@ -601,6 +639,8 @@ impl Config {
             ("function_calling", self.function_calling.to_string()),
             ("stream", self.stream.to_string()),
             ("save", self.save.to_string()),
+            ("think_tag_mode", self.think_tag_mode.to_string()),
+            ("think_tag_remove", self.think_tag_remove.to_string()),
             ("keybindings", self.keybindings.clone()),
             ("wrap", wrap),
             ("wrap_code", self.wrap_code.to_string()),
@@ -688,6 +728,14 @@ impl Config {
             "highlight" => {
                 let value = value.parse().with_context(|| "Invalid value")?;
                 config.write().highlight = value;
+            }
+            "think_tag_mode" => {
+                let value = value.parse().with_context(|| "Invalid value")?;
+                config.write().think_tag_mode = value;
+            }
+            "think_tag_remove" => {
+                let value = value.parse().with_context(|| "Invalid value")?;
+                config.write().think_tag_remove = value;
             }
             _ => bail!("Unknown key '{key}'"),
         }

@@ -429,8 +429,40 @@ pub async fn call_chat_completions(
                     text = extract_code_block(&strip_think_tag(&text)).to_string();
                 }
                 if print {
-                    client.global_config().read().print_markdown(&text)?;
+                    let think_tag_mode = client.global_config().read().think_tag_mode.clone();
+                    if THINK_TAG_RE.is_match(&text).unwrap_or_default() {
+                        match think_tag_mode {
+                            crate::config::ThinkTagMode::Hide => {}
+                            crate::config::ThinkTagMode::Replace => {
+                                println!("{}", dimmed_text("Thinking..."));
+                            }
+                            crate::config::ThinkTagMode::Show => {
+                                let content = THINK_TAG_RE
+                                    .captures(&text)
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|v| v.get(0))
+                                    .map(|v| v.as_str())
+                                    .unwrap_or_default();
+                                let content = content
+                                    .strip_prefix("<think>")
+                                    .unwrap_or(content)
+                                    .strip_suffix("</think>")
+                                    .unwrap_or(content)
+                                    .trim();
+                                println!("{} {}", dimmed_text("Thinking:"), dimmed_text(content));
+                            }
+                        }
+                    }
+                    let print_text = strip_think_tag(&text);
+                    client
+                        .global_config()
+                        .read()
+                        .print_markdown(&print_text)?;
                 }
+            }
+            if client.global_config().read().think_tag_remove {
+                text = strip_think_tag(&text).to_string();
             }
             Ok((text, eval_tool_calls(client.global_config(), tool_calls)?))
         }
@@ -457,7 +489,10 @@ pub async fn call_chat_completions_streaming(
 
     render_ret?;
 
-    let (text, tool_calls) = handler.take();
+    let (mut text, tool_calls) = handler.take();
+    if client.global_config().read().think_tag_remove {
+        text = strip_think_tag(&text).to_string();
+    }
     match send_ret {
         Ok(_) => {
             if !text.is_empty() && !text.ends_with('\n') {

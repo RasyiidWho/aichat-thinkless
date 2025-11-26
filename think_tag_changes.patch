@@ -1,0 +1,324 @@
+diff --git a/src/client/common.rs b/src/client/common.rs
+index 3b89d11..253065a 100644
+--- a/src/client/common.rs
++++ b/src/client/common.rs
+@@ -429,9 +429,41 @@ pub async fn call_chat_completions(
+                     text = extract_code_block(&strip_think_tag(&text)).to_string();
+                 }
+                 if print {
+-                    client.global_config().read().print_markdown(&text)?;
++                    let think_tag_mode = client.global_config().read().think_tag_mode.clone();
++                    if THINK_TAG_RE.is_match(&text).unwrap_or_default() {
++                        match think_tag_mode {
++                            crate::config::ThinkTagMode::Hide => {}
++                            crate::config::ThinkTagMode::Replace => {
++                                println!("{}", dimmed_text("Thinking..."));
++                            }
++                            crate::config::ThinkTagMode::Show => {
++                                let content = THINK_TAG_RE
++                                    .captures(&text)
++                                    .ok()
++                                    .flatten()
++                                    .and_then(|v| v.get(0))
++                                    .map(|v| v.as_str())
++                                    .unwrap_or_default();
++                                let content = content
++                                    .strip_prefix("<think>")
++                                    .unwrap_or(content)
++                                    .strip_suffix("</think>")
++                                    .unwrap_or(content)
++                                    .trim();
++                                println!("{} {}", dimmed_text("Thinking:"), dimmed_text(content));
++                            }
++                        }
++                    }
++                    let print_text = strip_think_tag(&text);
++                    client
++                        .global_config()
++                        .read()
++                        .print_markdown(&print_text)?;
+                 }
+             }
++            if client.global_config().read().think_tag_remove {
++                text = strip_think_tag(&text).to_string();
++            }
+             Ok((text, eval_tool_calls(client.global_config(), tool_calls)?))
+         }
+         Err(err) => Err(err),
+@@ -457,7 +489,10 @@ pub async fn call_chat_completions_streaming(
+ 
+     render_ret?;
+ 
+-    let (text, tool_calls) = handler.take();
++    let (mut text, tool_calls) = handler.take();
++    if client.global_config().read().think_tag_remove {
++        text = strip_think_tag(&text).to_string();
++    }
+     match send_ret {
+         Ok(_) => {
+             if !text.is_empty() && !text.ends_with('\n') {
+diff --git a/src/config/mod.rs b/src/config/mod.rs
+index 10718df..ca593b0 100644
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -96,6 +96,38 @@ const RIGHT_PROMPT: &str = "{color.purple}{?session {?consume_tokens {consume_to
+ 
+ static EDITOR: OnceLock<Option<String>> = OnceLock::new();
+ 
++#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
++#[serde(rename_all = "snake_case")]
++pub enum ThinkTagMode {
++    Hide,
++    #[default]
++    Replace,
++    Show,
++}
++
++impl std::fmt::Display for ThinkTagMode {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            ThinkTagMode::Hide => write!(f, "hide"),
++            ThinkTagMode::Replace => write!(f, "replace"),
++            ThinkTagMode::Show => write!(f, "show"),
++        }
++    }
++}
++
++impl std::str::FromStr for ThinkTagMode {
++    type Err = anyhow::Error;
++
++    fn from_str(s: &str) -> Result<Self, Self::Err> {
++        match s {
++            "hide" => Ok(ThinkTagMode::Hide),
++            "replace" => Ok(ThinkTagMode::Replace),
++            "show" => Ok(ThinkTagMode::Show),
++            _ => bail!("Invalid think_tag_mode: {}", s),
++        }
++    }
++}
++
+ #[derive(Debug, Clone, Deserialize)]
+ #[serde(default)]
+ pub struct Config {
+@@ -146,6 +178,9 @@ pub struct Config {
+     pub save_shell_history: bool,
+     pub sync_models_url: Option<String>,
+ 
++    pub think_tag_mode: ThinkTagMode,
++    pub think_tag_remove: bool,
++
+     pub clients: Vec<ClientConfig>,
+ 
+     #[serde(skip)]
+@@ -221,6 +256,9 @@ impl Default for Config {
+             save_shell_history: true,
+             sync_models_url: None,
+ 
++            think_tag_mode: Default::default(),
++            think_tag_remove: true,
++
+             clients: vec![],
+ 
+             macro_flag: false,
+@@ -601,6 +639,8 @@ impl Config {
+             ("function_calling", self.function_calling.to_string()),
+             ("stream", self.stream.to_string()),
+             ("save", self.save.to_string()),
++            ("think_tag_mode", self.think_tag_mode.to_string()),
++            ("think_tag_remove", self.think_tag_remove.to_string()),
+             ("keybindings", self.keybindings.clone()),
+             ("wrap", wrap),
+             ("wrap_code", self.wrap_code.to_string()),
+@@ -689,6 +729,14 @@ impl Config {
+                 let value = value.parse().with_context(|| "Invalid value")?;
+                 config.write().highlight = value;
+             }
++            "think_tag_mode" => {
++                let value = value.parse().with_context(|| "Invalid value")?;
++                config.write().think_tag_mode = value;
++            }
++            "think_tag_remove" => {
++                let value = value.parse().with_context(|| "Invalid value")?;
++                config.write().think_tag_remove = value;
++            }
+             _ => bail!("Unknown key '{key}'"),
+         }
+         Ok(())
+diff --git a/src/render/mod.rs b/src/render/mod.rs
+index 0aa3184..bcf6b3a 100644
+--- a/src/render/mod.rs
++++ b/src/render/mod.rs
+@@ -18,7 +18,7 @@ pub async fn render_stream(
+     let ret = if *IS_STDOUT_TERMINAL && config.read().highlight {
+         let render_options = config.read().render_options()?;
+         let mut render = MarkdownRender::init(render_options)?;
+-        markdown_stream(rx, &mut render, &abort_signal).await
++        markdown_stream(rx, config, &mut render, &abort_signal).await
+     } else {
+         raw_stream(rx, &abort_signal).await
+     };
+diff --git a/src/render/stream.rs b/src/render/stream.rs
+index d6cadde..8a860f3 100644
+--- a/src/render/stream.rs
++++ b/src/render/stream.rs
+@@ -1,6 +1,8 @@
+ use super::{MarkdownRender, SseEvent};
+ 
+-use crate::utils::{poll_abort_signal, spawn_spinner, AbortSignal};
++use crate::config::GlobalConfig;
++
++use crate::utils::{dimmed_text, poll_abort_signal, spawn_spinner, AbortSignal};
+ 
+ use anyhow::Result;
+ use crossterm::{
+@@ -16,13 +18,14 @@ use tokio::sync::mpsc::UnboundedReceiver;
+ 
+ pub async fn markdown_stream(
+     rx: UnboundedReceiver<SseEvent>,
++    config: &GlobalConfig,
+     render: &mut MarkdownRender,
+     abort_signal: &AbortSignal,
+ ) -> Result<()> {
+     enable_raw_mode()?;
+     let mut stdout = io::stdout();
+ 
+-    let ret = markdown_stream_inner(rx, render, abort_signal, &mut stdout).await;
++    let ret = markdown_stream_inner(rx, config, render, abort_signal, &mut stdout).await;
+ 
+     disable_raw_mode()?;
+ 
+@@ -66,6 +69,7 @@ pub async fn raw_stream(
+ 
+ async fn markdown_stream_inner(
+     mut rx: UnboundedReceiver<SseEvent>,
++    config: &GlobalConfig,
+     render: &mut MarkdownRender,
+     abort_signal: &AbortSignal,
+     writer: &mut Stdout,
+@@ -73,6 +77,8 @@ async fn markdown_stream_inner(
+     let mut buffer = String::new();
+     let mut buffer_rows = 1;
+ 
++    let mut in_think_block = false;
++
+     let columns = terminal::size()?.0;
+ 
+     let mut spinner = Some(spawn_spinner("Generating"));
+@@ -91,6 +97,104 @@ async fn markdown_stream_inner(
+                     // tab width hacking
+                     text = text.replace('\t', "    ");
+ 
++                    let think_tag_mode = config.read().think_tag_mode.clone();
++
++                    // Handle think tags inline according to mode, including streaming/incomplete tags
++                    match think_tag_mode {
++                        crate::config::ThinkTagMode::Hide => {
++                            // Remove think tags and content, even across chunks
++                            if in_think_block {
++                                if let Some(end_pos) = text.find("</think>") {
++                                    text.replace_range(..end_pos + 8, "");
++                                    in_think_block = false;
++                                } else {
++                                    // Still in think block, skip this chunk entirely
++                                    continue;
++                                }
++                            }
++
++                            while let Some(start) = text.find("<think>") {
++                                if let Some(end_rel) = text[start..].find("</think>") {
++                                    let end = start + end_rel + 8; // include </think>
++                                    text.replace_range(start..end, "");
++                                } else {
++                                    // Incomplete block, drop from start and mark state
++                                    text.replace_range(start.., "");
++                                    in_think_block = true;
++                                    break;
++                                }
++                            }
++                        }
++                        crate::config::ThinkTagMode::Replace => {
++                            if in_think_block {
++                                if let Some(end_pos) = text.find("</think>") {
++                                    text.replace_range(..end_pos + 8, "");
++                                    in_think_block = false;
++                                } else {
++                                    // Still in think block, skip this chunk
++                                    continue;
++                                }
++                            }
++
++                            while let Some(start) = text.find("<think>") {
++                                if let Some(end_rel) = text[start..].find("</think>") {
++                                    let end = start + end_rel + 8;
++                                    let replacement = format!("{}\n", dimmed_text("Thinking..."));
++                                    text.replace_range(start..end, &replacement);
++                                } else {
++                                    let replacement = format!("{}\n", dimmed_text("Thinking..."));
++                                    text.replace_range(start.., &replacement);
++                                    in_think_block = true;
++                                    break;
++                                }
++                            }
++                        }
++                        crate::config::ThinkTagMode::Show => {
++                            if in_think_block {
++                                if let Some(end_pos) = text.find("</think>") {
++                                    let content = text[..end_pos].trim();
++                                    if !content.is_empty() {
++                                        text.replace_range(..end_pos + 8, &format!("{}\n", dimmed_text(content)));
++                                    } else {
++                                        text.replace_range(..end_pos + 8, "\n");
++                                    }
++                                    in_think_block = false;
++                                } else {
++                                    let content = text.trim();
++                                    if !content.is_empty() {
++                                        text = format!("{} ", dimmed_text(content));
++                                    } else {
++                                        continue;
++                                    }
++                                }
++                            }
++
++                            while let Some(start) = text.find("<think>") {
++                                if let Some(end_rel) = text[start..].find("</think>") {
++                                    let content_start = start + 7; // after <think>
++                                    let content_end = start + end_rel;
++                                    let content = text[content_start..content_end].trim();
++                                    let replacement = if !content.is_empty() {
++                                        format!("{} {}\n", dimmed_text("Thinking:"), dimmed_text(content))
++                                    } else {
++                                        String::new()
++                                    };
++                                    text.replace_range(start..start + end_rel + 8, &replacement);
++                                } else {
++                                    let content = text[start + 7..].trim();
++                                    let replacement = if !content.is_empty() {
++                                        format!("{} {}", dimmed_text("Thinking:"), dimmed_text(content))
++                                    } else {
++                                        dimmed_text("Thinking: ")
++                                    };
++                                    text.replace_range(start.., &replacement);
++                                    in_think_block = true;
++                                    break;
++                                }
++                            }
++                        }
++                    }
++
+                     let mut attempts = 0;
+                     let (col, mut row) = loop {
+                         match cursor::position() {
+diff --git a/src/utils/mod.rs b/src/utils/mod.rs
+index e8369d8..4208727 100644
+--- a/src/utils/mod.rs
++++ b/src/utils/mod.rs
+@@ -37,6 +37,8 @@ pub static CODE_BLOCK_RE: LazyLock<Regex> =
+     LazyLock::new(|| Regex::new(r"(?ms)```\w*(.*)```").unwrap());
+ pub static THINK_TAG_RE: LazyLock<Regex> =
+     LazyLock::new(|| Regex::new(r"(?s)^\s*<think>.*?</think>(\s*|$)").unwrap());
++pub static THINK_TAG_START_RE: LazyLock<Regex> =
++    LazyLock::new(|| Regex::new(r"(?s)^\s*<think>").unwrap());
+ pub static IS_STDOUT_TERMINAL: LazyLock<bool> = LazyLock::new(|| std::io::stdout().is_terminal());
+ pub static NO_COLOR: LazyLock<bool> = LazyLock::new(|| {
+     env::var("NO_COLOR")

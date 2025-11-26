@@ -1,6 +1,8 @@
 use super::{MarkdownRender, SseEvent};
 
-use crate::utils::{poll_abort_signal, spawn_spinner, AbortSignal};
+use crate::config::GlobalConfig;
+
+use crate::utils::{dimmed_text, poll_abort_signal, spawn_spinner, AbortSignal};
 
 use anyhow::Result;
 use crossterm::{
@@ -16,13 +18,14 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 pub async fn markdown_stream(
     rx: UnboundedReceiver<SseEvent>,
+    config: &GlobalConfig,
     render: &mut MarkdownRender,
     abort_signal: &AbortSignal,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
 
-    let ret = markdown_stream_inner(rx, render, abort_signal, &mut stdout).await;
+    let ret = markdown_stream_inner(rx, config, render, abort_signal, &mut stdout).await;
 
     disable_raw_mode()?;
 
@@ -66,12 +69,15 @@ pub async fn raw_stream(
 
 async fn markdown_stream_inner(
     mut rx: UnboundedReceiver<SseEvent>,
+    config: &GlobalConfig,
     render: &mut MarkdownRender,
     abort_signal: &AbortSignal,
     writer: &mut Stdout,
 ) -> Result<()> {
     let mut buffer = String::new();
     let mut buffer_rows = 1;
+
+    let mut in_think_block = false;
 
     let columns = terminal::size()?.0;
 
@@ -90,6 +96,104 @@ async fn markdown_stream_inner(
                 SseEvent::Text(mut text) => {
                     // tab width hacking
                     text = text.replace('\t', "    ");
+
+                    let think_tag_mode = config.read().think_tag_mode.clone();
+
+                    // Handle think tags inline according to mode, including streaming/incomplete tags
+                    match think_tag_mode {
+                        crate::config::ThinkTagMode::Hide => {
+                            // Remove think tags and content, even across chunks
+                            if in_think_block {
+                                if let Some(end_pos) = text.find("</think>") {
+                                    text.replace_range(..end_pos + 8, "");
+                                    in_think_block = false;
+                                } else {
+                                    // Still in think block, skip this chunk entirely
+                                    continue;
+                                }
+                            }
+
+                            while let Some(start) = text.find("<think>") {
+                                if let Some(end_rel) = text[start..].find("</think>") {
+                                    let end = start + end_rel + 8; // include </think>
+                                    text.replace_range(start..end, "");
+                                } else {
+                                    // Incomplete block, drop from start and mark state
+                                    text.replace_range(start.., "");
+                                    in_think_block = true;
+                                    break;
+                                }
+                            }
+                        }
+                        crate::config::ThinkTagMode::Replace => {
+                            if in_think_block {
+                                if let Some(end_pos) = text.find("</think>") {
+                                    text.replace_range(..end_pos + 8, "");
+                                    in_think_block = false;
+                                } else {
+                                    // Still in think block, skip this chunk
+                                    continue;
+                                }
+                            }
+
+                            while let Some(start) = text.find("<think>") {
+                                if let Some(end_rel) = text[start..].find("</think>") {
+                                    let end = start + end_rel + 8;
+                                    let replacement = format!("{}\n", dimmed_text("Thinking..."));
+                                    text.replace_range(start..end, &replacement);
+                                } else {
+                                    let replacement = format!("{}\n", dimmed_text("Thinking..."));
+                                    text.replace_range(start.., &replacement);
+                                    in_think_block = true;
+                                    break;
+                                }
+                            }
+                        }
+                        crate::config::ThinkTagMode::Show => {
+                            if in_think_block {
+                                if let Some(end_pos) = text.find("</think>") {
+                                    let content = text[..end_pos].trim();
+                                    if !content.is_empty() {
+                                        text.replace_range(..end_pos + 8, &format!("{}\n", dimmed_text(content)));
+                                    } else {
+                                        text.replace_range(..end_pos + 8, "\n");
+                                    }
+                                    in_think_block = false;
+                                } else {
+                                    let content = text.trim();
+                                    if !content.is_empty() {
+                                        text = format!("{} ", dimmed_text(content));
+                                    } else {
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            while let Some(start) = text.find("<think>") {
+                                if let Some(end_rel) = text[start..].find("</think>") {
+                                    let content_start = start + 7; // after <think>
+                                    let content_end = start + end_rel;
+                                    let content = text[content_start..content_end].trim();
+                                    let replacement = if !content.is_empty() {
+                                        format!("{} {}\n", dimmed_text("Thinking:"), dimmed_text(content))
+                                    } else {
+                                        String::new()
+                                    };
+                                    text.replace_range(start..start + end_rel + 8, &replacement);
+                                } else {
+                                    let content = text[start + 7..].trim();
+                                    let replacement = if !content.is_empty() {
+                                        format!("{} {}", dimmed_text("Thinking:"), dimmed_text(content))
+                                    } else {
+                                        dimmed_text("Thinking: ")
+                                    };
+                                    text.replace_range(start.., &replacement);
+                                    in_think_block = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
 
                     let mut attempts = 0;
                     let (col, mut row) = loop {
