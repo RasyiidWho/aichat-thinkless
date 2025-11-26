@@ -461,9 +461,6 @@ pub async fn call_chat_completions(
                         .print_markdown(&print_text)?;
                 }
             }
-            if client.global_config().read().think_tag_remove {
-                text = strip_think_tag(&text).to_string();
-            }
             Ok((text, eval_tool_calls(client.global_config(), tool_calls)?))
         }
         Err(err) => Err(err),
@@ -489,10 +486,7 @@ pub async fn call_chat_completions_streaming(
 
     render_ret?;
 
-    let (mut text, tool_calls) = handler.take();
-    if client.global_config().read().think_tag_remove {
-        text = strip_think_tag(&text).to_string();
-    }
+    let (text, tool_calls) = handler.take();
     match send_ret {
         Ok(_) => {
             if !text.is_empty() && !text.ends_with('\n') {
