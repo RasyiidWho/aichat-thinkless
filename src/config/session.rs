@@ -467,6 +467,7 @@ impl Session {
     }
 
     pub fn add_message(&mut self, input: &Input, output: &str) -> Result<()> {
+        let output = strip_think_tag(output);
         if input.continue_output().is_some() {
             if let Some(message) = self.messages.last_mut() {
                 if let MessageContent::Text(text) = &mut message.content {
