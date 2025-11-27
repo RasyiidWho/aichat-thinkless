@@ -452,6 +452,16 @@ pub async fn call_chat_completions(
                                     .trim();
                                 println!("{} {}", dimmed_text("Thinking:"), dimmed_text(content));
                             }
+                            crate::config::ThinkTagMode::Default => {
+                                let content = THINK_TAG_RE
+                                    .captures(&text)
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|v| v.get(0))
+                                    .map(|v| v.as_str())
+                                    .unwrap_or_default();
+                                println!("{}", dimmed_text(content));
+                            }
                         }
                     }
                     let print_text = strip_think_tag(&text);

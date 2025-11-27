@@ -208,6 +208,67 @@ async fn markdown_stream_inner<W: Write>(
                                 break;
                             }
                         }
+                    } else if think_tag_mode == crate::config::ThinkTagMode::Default {
+                        if in_think_block {
+                            if let Some(end_pos) = text.find("</think>") {
+                                let content = &text[..end_pos + 8];
+                                let output = dimmed_text(content).replace('\n', "\r\n");
+                                queue!(writer, style::Print(output))?;
+                                text.replace_range(..end_pos + 8, "");
+                                in_think_block = false;
+                            } else {
+                                let output = dimmed_text(&text).replace('\n', "\r\n");
+                                queue!(writer, style::Print(output))?;
+                                writer.flush()?;
+                                continue;
+                            }
+                        }
+
+                        while let Some(start) = text.find("<think>") {
+                            if let Some(end_rel) = text[start..].find("</think>") {
+                                let pre_content = &text[..start];
+                                if !pre_content.is_empty() {
+                                    // Flush buffer before printing think block
+                                    if !buffer.is_empty() {
+                                        let output = render.render_line(&buffer);
+                                        queue!(writer, style::Print(&output))?;
+                                        buffer.clear();
+                                        buffer_rows = 1; // Reset buffer rows
+                                    }
+                                    queue!(writer, style::Print(pre_content))?;
+                                }
+
+                                let end = start + end_rel + 8;
+                                let content = &text[start..end];
+                                let output = dimmed_text(content).replace('\n', "\r\n");
+                                queue!(writer, style::Print(output))?;
+                                
+                                text.replace_range(..end, "");
+                            } else {
+                                let pre_content = &text[..start];
+                                // Print content before <think>
+                                if !buffer.is_empty() {
+                                    // Let's print the buffer using the renderer
+                                     let output = render.render_line(&buffer);
+                                     queue!(writer, style::Print(&output))?;
+                                     buffer.clear();
+                                     buffer_rows = 1;
+                                }
+                                
+                                if !pre_content.is_empty() {
+                                     queue!(writer, style::Print(pre_content))?;
+                                }
+
+                                let content = &text[start..];
+                                let output = dimmed_text(content).replace('\n', "\r\n");
+                                queue!(writer, style::Print(output))?;
+                                writer.flush()?;
+                                
+                                in_think_block = true;
+                                text.clear(); // Consumed everything
+                                break;
+                            }
+                        }
                     }
 
                     if text.is_empty() {

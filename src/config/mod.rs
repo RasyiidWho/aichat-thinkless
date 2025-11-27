@@ -103,6 +103,7 @@ pub enum ThinkTagMode {
     #[default]
     Replace,
     Show,
+    Default,
 }
 
 impl std::fmt::Display for ThinkTagMode {
@@ -111,6 +112,7 @@ impl std::fmt::Display for ThinkTagMode {
             ThinkTagMode::Hide => write!(f, "hide"),
             ThinkTagMode::Replace => write!(f, "replace"),
             ThinkTagMode::Show => write!(f, "show"),
+            ThinkTagMode::Default => write!(f, "default"),
         }
     }
 }
@@ -123,6 +125,7 @@ impl std::str::FromStr for ThinkTagMode {
             "hide" => Ok(ThinkTagMode::Hide),
             "replace" => Ok(ThinkTagMode::Replace),
             "show" => Ok(ThinkTagMode::Show),
+            "default" => Ok(ThinkTagMode::Default),
             _ => bail!("Invalid think_tag_mode: {}", s),
         }
     }
@@ -178,6 +181,7 @@ pub struct Config {
     pub save_shell_history: bool,
     pub sync_models_url: Option<String>,
 
+    pub greeting: bool,
     pub think_tag_mode: ThinkTagMode,
 
     pub clients: Vec<ClientConfig>,
@@ -255,6 +259,7 @@ impl Default for Config {
             save_shell_history: true,
             sync_models_url: None,
 
+            greeting: true,
             think_tag_mode: Default::default(),
 
             clients: vec![],

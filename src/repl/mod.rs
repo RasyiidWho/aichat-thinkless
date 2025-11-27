@@ -213,8 +213,9 @@ impl Repl {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        if AssertState::False(StateFlags::AGENT | StateFlags::RAG)
-            .assert(self.config.read().state())
+        if self.config.read().greeting
+            && AssertState::False(StateFlags::AGENT | StateFlags::RAG)
+                .assert(self.config.read().state())
         {
             print!(
                 r#"Welcome to {} {}
