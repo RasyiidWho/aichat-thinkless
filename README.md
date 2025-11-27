@@ -1,10 +1,18 @@
-# AIChat: All-in-one LLM CLI Tool
+# AIChat: All-in-one LLM CLI Tool - A Thinkless Fork
 
 [![CI](https://github.com/sigoden/aichat/actions/workflows/ci.yaml/badge.svg)](https://github.com/sigoden/aichat/actions/workflows/ci.yaml)
 [![Crates](https://img.shields.io/crates/v/aichat.svg)](https://crates.io/crates/aichat)
 [![Discord](https://img.shields.io/discord/1226737085453701222?label=Discord)](https://discord.gg/mr3ZZUB9hG)
 
 AIChat is an all-in-one LLM CLI tool featuring Shell Assistant, CMD & REPL Mode, RAG, AI Tools & Agents, and More. 
+
+> [!NOTE]
+> What's the difference between the original?
+>
+> - Created a configuration option called `think_tag_mode` to change the behavior of how AIChat handles the think tag.
+> - Created a configuration option called `greeting` to toggle visibility of the greeting message.
+>
+> Refer to the example config [here](https://github.com/RasyiidWho/aichat-thinkless/blob/main/config.example.yaml) to change the options.
 
 ## Install
 
