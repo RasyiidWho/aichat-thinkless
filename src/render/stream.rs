@@ -211,10 +211,10 @@ async fn markdown_stream_inner<W: Write>(
                     } else if think_tag_mode == crate::config::ThinkTagMode::Default {
                         if in_think_block {
                             if let Some(end_pos) = text.find("</think>") {
-                                let content = &text[..end_pos + 8];
+                                let content = &text[..end_pos + "</think>".len()];
                                 let output = dimmed_text(content).replace('\n', "\r\n");
                                 queue!(writer, style::Print(output))?;
-                                text.replace_range(..end_pos + 8, "");
+                                text.replace_range(..end_pos + "</think>".len(), "");
                                 in_think_block = false;
                             } else {
                                 let output = dimmed_text(&text).replace('\n', "\r\n");
@@ -238,7 +238,7 @@ async fn markdown_stream_inner<W: Write>(
                                     queue!(writer, style::Print(pre_content))?;
                                 }
 
-                                let end = start + end_rel + 8;
+                                let end = start + end_rel + "</think>".len();
                                 let content = &text[start..end];
                                 let output = dimmed_text(content).replace('\n', "\r\n");
                                 queue!(writer, style::Print(output))?;
